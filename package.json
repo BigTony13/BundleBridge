@@ -5,6 +5,7 @@
   "version": "0.1.0",
   "publisher": "timesheets",
   "license": "MIT",
+  "icon": "media/icon.png",
   "pricing": "Free",
   "repository": {
     "type": "git",
