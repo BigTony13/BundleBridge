@@ -1,0 +1,224 @@
+{
+  "name": "bundlebridge",
+  "displayName": "BundleBridge — Properties Resource Bundle Editor",
+  "description": "Edit Java properties translations together with a searchable key tree and configurable formatting.",
+  "version": "0.1.0",
+  "publisher": "timesheets",
+  "license": "MIT",
+  "pricing": "Free",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./src/extension.js",
+  "activationEvents": [
+    "onCommand:bundleBridge.open",
+    "onCommand:bundleBridge.createBundle"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check": "node --check src/extension.js && node --check src/properties.js && node --check media/editor.js",
+    "package": "npx @vscode/vsce package --allow-missing-repository"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "bundleBridge.open",
+        "title": "BundleBridge: Open Bundle Editor"
+      },
+      {
+        "command": "bundleBridge.createBundle",
+        "title": "BundleBridge: New Bundle…"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "bundleBridge.createBundle",
+          "when": "explorerResourceIsFolder",
+          "group": "navigation"
+        },
+        {
+          "command": "bundleBridge.open",
+          "when": "resourceExtname == .properties",
+          "group": "navigation"
+        },
+        {
+          "command": "bundleBridge.createBundle",
+          "when": "resourceExtname == .properties",
+          "group": "navigation"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "bundleBridge.open",
+          "when": "resourceExtname == .properties",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "BundleBridge",
+      "properties": {
+        "bundleBridge.unicodeEscape": {
+          "type": "boolean",
+          "default": true,
+          "description": "Encode non-ASCII characters as Java \\uXXXX escapes when saving.",
+          "scope": "resource"
+        },
+        "bundleBridge.uppercaseHex": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use uppercase hexadecimal digits in Unicode escapes.",
+          "scope": "resource"
+        },
+        "bundleBridge.delimiter": {
+          "type": "string",
+          "default": "=",
+          "description": "Separator between each key and value.",
+          "scope": "resource",
+          "enum": [
+            "=",
+            ":"
+          ]
+        },
+        "bundleBridge.spacesAroundDelimiter": {
+          "type": "boolean",
+          "default": true,
+          "description": "Add a space on each side of the delimiter.",
+          "scope": "resource"
+        },
+        "bundleBridge.alignment": {
+          "type": "string",
+          "default": "none",
+          "description": "Align delimiters across the file or within key groups.",
+          "scope": "resource",
+          "enum": [
+            "none",
+            "file",
+            "group"
+          ]
+        },
+        "bundleBridge.sortKeys": {
+          "type": "boolean",
+          "default": false,
+          "description": "Sort keys alphabetically when saving.",
+          "scope": "resource"
+        },
+        "bundleBridge.groupKeys": {
+          "type": "boolean",
+          "default": false,
+          "description": "Sort keys into groups and insert blank lines between groups.",
+          "scope": "resource"
+        },
+        "bundleBridge.groupSeparator": {
+          "type": "string",
+          "default": ".",
+          "description": "Separator used to build the key tree and formatting groups.",
+          "scope": "resource",
+          "minLength": 1
+        },
+        "bundleBridge.groupDepth": {
+          "type": "integer",
+          "default": 1,
+          "description": "Number of key segments in each formatting group.",
+          "scope": "resource",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "bundleBridge.blankLinesBetweenGroups": {
+          "type": "integer",
+          "default": 1,
+          "description": "Blank lines inserted between groups.",
+          "scope": "resource",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "bundleBridge.wrapColumn": {
+          "type": "integer",
+          "default": 0,
+          "description": "Wrap values with Java continuation lines at this column. Zero disables wrapping.",
+          "scope": "resource",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "bundleBridge.wrapIndent": {
+          "type": "integer",
+          "default": 8,
+          "description": "Spaces to indent continuation lines.",
+          "scope": "resource",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "bundleBridge.wrapAlign": {
+          "type": "boolean",
+          "default": false,
+          "description": "Align continuation lines with the beginning of the value.",
+          "scope": "resource"
+        },
+        "bundleBridge.wrapAfterNewline": {
+          "type": "boolean",
+          "default": false,
+          "description": "Start a continuation line after escaped newline characters.",
+          "scope": "resource"
+        },
+        "bundleBridge.valueNewline": {
+          "type": "string",
+          "default": "preserve",
+          "description": "Normalize newline characters inside translation values.",
+          "scope": "resource",
+          "enum": [
+            "preserve",
+            "lf",
+            "crlf",
+            "cr"
+          ]
+        },
+        "bundleBridge.lineEnding": {
+          "type": "string",
+          "default": "preserve",
+          "description": "Physical line endings used when saving files.",
+          "scope": "resource",
+          "enum": [
+            "preserve",
+            "lf",
+            "crlf",
+            "cr"
+          ]
+        },
+        "bundleBridge.keepEmptyValues": {
+          "type": "boolean",
+          "default": true,
+          "description": "Keep keys with empty values. Disabling this removes empty entries on save.",
+          "scope": "resource"
+        },
+        "bundleBridge.generatedHeader": {
+          "type": "boolean",
+          "default": false,
+          "description": "Include a generated-by header.",
+          "scope": "resource"
+        },
+        "bundleBridge.userLocaleOrder": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Locale order for the translation panel when no workspace folder is open (User settings only). Not combined with Workspace locale order. Use \"\" for the base .properties file.",
+          "scope": "application"
+        },
+        "bundleBridge.workspaceLocaleOrder": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Locale order for the translation panel in this workspace (Workspace settings only). Not combined with User locale order. Removing a locale from this list is respected; new locales are added only when you create locale files with BundleBridge. Use \"\" for the base .properties file.",
+          "scope": "window"
+        }
+      }
+    }
+  }
+}
