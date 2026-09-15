@@ -6,6 +6,10 @@
   "publisher": "timesheets",
   "license": "MIT",
   "pricing": "Free",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BigTony13/BundleBridge.git"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
