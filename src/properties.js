@@ -139,4 +139,14 @@ function sortFilesByLocaleOrder(items,localeOrder,localeOf){
   });
 }
 function values(model){return Object.fromEntries(model.entries.map(e=>[e.key,e.value]));}
-module.exports={defaults,parse,format,bundleName,bundleFileName,normalizeBundleBase,validateBundleBase,folderLocales,buildLocaleTag,localeTagError,normalizeLocaleOrder,appendMissingLocales,mergeLocaleOrder,localeOrderAppended,sortFilesByLocaleOrder,values};
+function duplicateKeyInfo(model){
+  const counts=new Map();
+  for(const e of model.entries)counts.set(e.key,(counts.get(e.key)||0)+1);
+  const duplicates=[],duplicateCounts={};
+  for(const [key,count] of counts){
+    if(count>1){duplicates.push(key);duplicateCounts[key]=count;}
+  }
+  duplicates.sort();
+  return {duplicates,duplicateCounts};
+}
+module.exports={defaults,parse,format,bundleName,bundleFileName,normalizeBundleBase,validateBundleBase,folderLocales,buildLocaleTag,localeTagError,normalizeLocaleOrder,appendMissingLocales,mergeLocaleOrder,localeOrderAppended,sortFilesByLocaleOrder,values,duplicateKeyInfo};

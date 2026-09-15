@@ -1,4 +1,4 @@
-const {test}=require('node:test');const assert=require('node:assert/strict');const {parse,format,values,bundleName,bundleFileName,folderLocales,validateBundleBase,buildLocaleTag,localeTagError,appendMissingLocales,mergeLocaleOrder,localeOrderAppended,sortFilesByLocaleOrder}=require('../src/properties');
+const {test}=require('node:test');const assert=require('node:assert/strict');const {parse,format,values,bundleName,bundleFileName,folderLocales,validateBundleBase,buildLocaleTag,localeTagError,appendMissingLocales,mergeLocaleOrder,localeOrderAppended,sortFilesByLocaleOrder,duplicateKeyInfo}=require('../src/properties');
 test('Java delimiters, comments, escaped keys, Unicode and continuations',()=>{
  const p=parse('# header\r\na\\ b\\:c :  Hello\\nworld\r\nemoji=\\uD83D\\uDE00\r\nwrapped=one\\\r\n   two\r\nspace value\r\nempty\r\n');
  assert.deepEqual(values(p),{'a b:c':'Hello\nworld',emoji:'😀',wrapped:'onetwo',space:'value',empty:''});assert.equal(p.eol,'\r\n');assert.equal(p.header[0],'# header');
@@ -41,6 +41,7 @@ test('alignment and grouping use escaped key lengths and exact group names',()=>
 test('empty values preserved by default and optionally removed',()=>{assert.equal(format(parse('empty=\n')),'empty = \n');assert.equal(format(parse('empty=\n'),{keepEmptyValues:false}),'');});
 test('malformed Unicode is rejected instead of silently corrupted',()=>{assert.throws(()=>parse('a=\\u12xz'),/Malformed/);});
 test('duplicate keys remain explicit and effective value is last',()=>{const p=parse('a=1\na=2\n');assert.equal(p.entries.length,2);assert.equal(values(p).a,'2');});
+test('duplicateKeyInfo lists unique keys and occurrence counts',()=>{assert.deepEqual(duplicateKeyInfo(parse('a=1\na=2\nb=1\n')),{duplicates:['a'],duplicateCounts:{a:2}});assert.deepEqual(duplicateKeyInfo(parse('x=1\ny=2\n')),{duplicates:[],duplicateCounts:{}});});
 test('prototype names are ordinary resource keys',()=>{const p=parse('__proto__=ok\nconstructor=yes\n');assert.equal(values(p).__proto__,'ok');assert.equal(values(parse(format(p))).constructor,'yes');});
 test('physical and value newline settings are independent',()=>{assert.equal(format(parse('a=one\\ntwo\n'),{lineEnding:'crlf',valueNewline:'cr'}),'a = one\\rtwo\r\n');});
 test('deterministic random semantic round trips across wrapping settings',()=>{

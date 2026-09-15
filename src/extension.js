@@ -1,7 +1,7 @@
 'use strict';
 const vscode=require('vscode');
 const crypto=require('node:crypto');
-const {parse,format,bundleName,bundleFileName,normalizeBundleBase,validateBundleBase,folderLocales,buildLocaleTag,localeTagError,normalizeLocaleOrder,sortFilesByLocaleOrder,values,defaults}=require('./properties');
+const {parse,format,bundleName,bundleFileName,normalizeBundleBase,validateBundleBase,folderLocales,buildLocaleTag,localeTagError,normalizeLocaleOrder,sortFilesByLocaleOrder,values,duplicateKeyInfo,defaults}=require('./properties');
 function localeOrderFromInspect(inspected,layers){
   if(!inspected)return[];
   for(const layer of layers){
@@ -109,8 +109,8 @@ function activate(context) {
         for(const [filename,type]of children){const n=bundleName(filename);if(type!==vscode.FileType.File||n?.base!==name.base)continue;
           const doc=await vscode.workspace.openTextDocument(vscode.Uri.joinPath(folder,filename));
           const model=parse(doc.getText());
-          const duplicates=model.entries.filter((e,i,a)=>a.findIndex(x=>x.key===e.key)!==i).map(e=>e.key);
-          found.push({filename,locale:n.locale,doc,model,duplicates});
+          const {duplicates,duplicateCounts}=duplicateKeyInfo(model);
+          found.push({filename,locale:n.locale,doc,model,duplicates,duplicateCounts});
         }
         activeLocaleOrder=readLocaleOrder(configUri);
         files=sortFilesByLocaleOrder(found,activeLocaleOrder,f=>f.locale);
@@ -120,7 +120,7 @@ function activate(context) {
         const config=vscode.workspace.getConfiguration('bundleBridge',configUri);
         activeLocaleOrder=readLocaleOrder(configUri);
         const ordered=sortFilesByLocaleOrder(files,activeLocaleOrder,f=>f.locale);
-        const base=ordered.map(f=>({filename:f.filename,locale:f.locale,values:values(f.model),duplicates:f.duplicates}));
+        const base=ordered.map(f=>({filename:f.filename,locale:f.locale,values:values(f.model),duplicates:f.duplicates,duplicateCounts:f.duplicateCounts}));
         await panel.webview.postMessage({type:'state',name:name.base,files:base,draft,localeOrder:activeLocaleOrder,separator:config.get('groupSeparator','.')});
       }
       async function refresh(){await discover();await publish();}
@@ -194,7 +194,7 @@ function activate(context) {
       const nonce=crypto.randomBytes(24).toString('hex');const media=n=>panel.webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri,'media',n));
       panel.webview.html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${panel.webview.cspSource}; script-src 'nonce-${nonce}';"><link rel="stylesheet" href="${media('editor.css')}"></head><body>
       <header><div><span class="eyebrow">BUNDLEBRIDGE</span><h1 id="title">Loading…</h1></div><div class="actions"><button id="newLocale">Add locale…</button><button id="localeOrder">Locale order…</button><button id="settings">Settings</button><button id="format">Format files</button><button id="discard">Discard draft</button><button id="save" class="primary">Save bundle</button></div></header>
-      <div id="notice" role="status" aria-live="polite"></div><main><aside><div class="search"><input id="search" type="search" placeholder="Search keys and translations" aria-label="Search keys and translations"><label><input id="missing" type="checkbox"> Missing translations only</label></div><div class="tree-toolbar"><span id="count"></span><button id="expand">Expand all</button><button id="collapse">Collapse all</button></div><nav id="tree" aria-label="Resource keys"></nav><button id="add" class="primary">＋ Add key</button></aside><section id="detail"><div class="keybar"><div><span class="eyebrow">SELECTED KEY</span><h2 id="key">Select a key</h2></div><div class="actions"><button id="copy">Copy key</button><button id="duplicate">Duplicate</button><button id="rename">Rename</button><button id="delete">Delete</button></div></div><div id="editors"></div></section></main><footer id="footer">Loading bundle…</footer><script nonce="${nonce}" src="${media('editor.js')}"></script></body></html>`;
+      <div id="notice" role="status" aria-live="polite"></div><main><aside><div class="search"><input id="search" type="search" placeholder="Search keys and translations" aria-label="Search keys and translations"><label><input id="missing" type="checkbox"> Missing translations only</label><label><input id="duplicates" type="checkbox"> Duplicate source keys only</label></div><div class="tree-toolbar"><span id="count"></span><button id="expand">Expand all</button><button id="collapse">Collapse all</button></div><nav id="tree" aria-label="Resource keys"></nav><button id="add" class="primary">＋ Add key</button></aside><section id="detail"><div class="keybar"><div><span class="eyebrow">SELECTED KEY</span><h2 id="key">Select a key</h2></div><div class="actions"><button id="copy">Copy key</button><button id="duplicate">Duplicate</button><button id="rename">Rename</button><button id="delete">Delete</button></div></div><div id="editors"></div></section></main><footer id="footer">Loading bundle…</footer><script nonce="${nonce}" src="${media('editor.js')}"></script></body></html>`;
     }catch(e){vscode.window.showErrorMessage(e.message);}
   }));
 }
