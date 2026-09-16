@@ -2,6 +2,8 @@
 const vscode=require('vscode');
 const crypto=require('node:crypto');
 const {parse,format,bundleName,bundleFileName,normalizeBundleBase,validateBundleBase,folderLocales,buildLocaleTag,localeTagError,normalizeLocaleOrder,sortFilesByLocaleOrder,values,duplicateKeyInfo,defaults}=require('./properties');
+const {replaceFullDocument,summarizeApplyFailures}=require('./applyDocument');
+const {bundleLog,showBundleLog,logLines}=require('./log');
 function localeOrderFromInspect(inspected,layers){
   if(!inspected)return[];
   for(const layer of layers){
@@ -88,6 +90,8 @@ async function createBundle(uri){
   await vscode.commands.executeCommand('bundleBridge.open',vscode.Uri.joinPath(uri,openFile));
 }
 function activate(context) {
+  const log=bundleLog(context);
+  context.subscriptions.push(vscode.commands.registerCommand('bundleBridge.showLog',()=>showBundleLog()));
   context.subscriptions.push(vscode.commands.registerCommand('bundleBridge.createBundle',async uri=>{try{await createBundle(uri);}catch(e){vscode.window.showErrorMessage(e.message);}}));
   context.subscriptions.push(vscode.commands.registerCommand('bundleBridge.open',async uri=>{
     try {
@@ -126,8 +130,18 @@ function activate(context) {
       async function refresh(){await discover();await publish();}
       function beginDraft(){if(!draft)draft={original:Object.fromEntries(files.map(f=>[f.filename,f.doc.getText()])),values:Object.fromEntries(files.map(f=>[f.filename,values(f.model)])),comments:Object.fromEntries(files.map(f=>[f.filename,Object.fromEntries(f.model.entries.map(e=>[e.key,e.comments]))]))};}
       function keys(){return [...new Set(Object.values(draft?.values||Object.fromEntries(files.map(f=>[f.filename,values(f.model)]))).flatMap(v=>Object.keys(v)))];}
+      async function reportPanelError(e){
+        const text=e.message||String(e);
+        const showLog=!!e.bundleBridgeLogged;
+        if(!disposed)await panel.webview.postMessage({type:'error',text,showLog});
+        if(showLog){
+          const pick=await vscode.window.showErrorMessage(text,'View log');
+          if(pick==='View log')showBundleLog();
+        }else vscode.window.showErrorMessage(text);
+      }
       async function handle(m){
         if(!m||typeof m.type!=='string')return;
+        if(m.type==='showLog')return showBundleLog();
         if(m.type==='ready')return refresh();
         if(m.type==='settings')return vscode.commands.executeCommand('workbench.action.openSettings','@ext:timesheets.bundlebridge');
         if(m.type==='localeOrder')return vscode.commands.executeCommand('workbench.action.openSettings','@ext:timesheets.bundlebridge bundleBridge.'+localeOrderSettingKey());
@@ -164,27 +178,48 @@ function activate(context) {
           return;
         }
         if(m.type==='save'||m.type==='format'){
+          const operation=m.type;const hadDraft=!!draft;
           await discover(); if(!draft&&m.type==='save')return publish();
           if(files.some(f=>f.duplicates.length))throw Error('Duplicate keys exist in a source file. Resolve them in the source editor before saving this bundle.');
           if(draft){
             const current=files.map(f=>f.filename).sort(), original=Object.keys(draft.original).sort();
             if(JSON.stringify(current)!==JSON.stringify(original)||files.some(f=>f.doc.getText()!==draft.original[f.filename]))throw Error('Source files changed since editing began. Your draft is retained. Copy any needed translations, then discard the draft to load the latest source files.');
           }
-          const config=vscode.workspace.getConfiguration('bundleBridge',uri), options=Object.fromEntries(Object.keys(defaults).map(k=>[k,config.get(k,defaults[k])]));
-          const edit=new vscode.WorkspaceEdit();
+          const config=vscode.workspace.getConfiguration('bundleBridge',configUri), options=Object.fromEntries(Object.keys(defaults).map(k=>[k,config.get(k,defaults[k])]));
+          logLines(log,'info',`${operation} started`,{bundle:name.base,folder:folder.fsPath,files:files.map(f=>f.filename),hadDraft});
+          const failures=[];let changedFiles=0;
           for(const f of files){let model=f.model;
             if(draft){const v=draft.values[f.filename];const old=new Map(model.entries.map(e=>[e.key,e]));model={...model,entries:Object.entries(v).map(([key,value])=>({key,value,comments:Array.isArray(draft.comments?.[f.filename]?.[key])?draft.comments[f.filename][key]:(old.get(key)?.comments||[])}))};}
-            const output=format(model,options);if(output!==f.doc.getText())edit.replace(f.doc.uri,new vscode.Range(f.doc.positionAt(0),f.doc.positionAt(f.doc.getText().length)),output);
+            const output=format(model,options);
+            const doc=await vscode.workspace.openTextDocument(f.doc.uri);
+            const result=await replaceFullDocument(doc,output,log,`${operation} · ${f.filename}`);
+            if(!result.ok)failures.push({filename:f.filename,reason:result.reason,method:result.method,diagnostics:result.diagnostics});
+            else if(!result.skipped)changedFiles++;
           }
-          if(!await vscode.workspace.applyEdit(edit))throw Error('The editor could not apply these changes. Your draft is retained.');
+          if(failures.length){
+            logLines(log,'error',`${operation} failed`,{bundle:name.base,failures});
+            const err=new Error(summarizeApplyFailures(failures,operation)+(hadDraft?' Your bundle draft is retained.':''));
+            err.bundleBridgeLogged=true;
+            throw err;
+          }
           // Changes now belong to native text documents, which retain unsaved edits if saving fails.
-          draft=undefined;await persist();
-          const saved=await Promise.all(files.map(f=>f.doc.save()));await refresh();
-          if(saved.some(s=>!s))throw Error('Some files could not be saved. Their changes remain in the source editor as unsaved edits.');
-          await panel.webview.postMessage({type:'notice',text:'Bundle saved.'});
+          if(hadDraft||operation==='save'){draft=undefined;await persist();}
+          if(changedFiles){
+            const saved=await Promise.all(files.map(f=>f.doc.save()));
+            if(saved.some(s=>!s)){
+              logLines(log,'error',`${operation} save failed`,{bundle:name.base,files:files.filter((f,i)=>!saved[i]).map(f=>f.filename)});
+              const err=new Error('Some files could not be saved. Their changes remain in the source editor as unsaved edits.');
+              err.bundleBridgeLogged=true;
+              throw err;
+            }
+          }
+          await refresh();
+          const notice=operation==='format'?changedFiles?`Formatted ${changedFiles} locale file${changedFiles===1?'':'s'}.`:'All locale files already match your formatting settings.':'Bundle saved.';
+          logLines(log,'info',`${operation} completed`,{bundle:name.base,changedFiles});
+          await panel.webview.postMessage({type:'notice',text:notice});
         }
       }
-      panel.webview.onDidReceiveMessage(m=>{chain=chain.then(()=>handle(m)).catch(async e=>{if(!disposed)await panel.webview.postMessage({type:'error',text:e.message});vscode.window.showErrorMessage(e.message);});},null,context.subscriptions);
+      panel.webview.onDidReceiveMessage(m=>{chain=chain.then(()=>handle(m)).catch(e=>reportPanelError(e));},null,context.subscriptions);
       const watcher=vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(folder,'*.properties'));
       const changed=()=>{chain=chain.then(refresh).catch(e=>{if(!disposed)panel.webview.postMessage({type:'error',text:e.message});});};
       watcher.onDidCreate(changed);watcher.onDidDelete(changed);watcher.onDidChange(changed);

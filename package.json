@@ -24,7 +24,7 @@
   ],
   "scripts": {
     "test": "node --test test/*.test.js",
-    "check": "node --check src/extension.js && node --check src/properties.js && node --check media/editor.js",
+    "check": "node --check src/extension.js && node --check src/properties.js && node --check src/applyDocument.js && node --check src/log.js && node --check media/editor.js",
     "package": "npx @vscode/vsce package --allow-missing-repository"
   },
   "contributes": {
@@ -36,6 +36,10 @@
       {
         "command": "bundleBridge.createBundle",
         "title": "BundleBridge: New Bundle…"
+      },
+      {
+        "command": "bundleBridge.showLog",
+        "title": "BundleBridge: Show Diagnostic Log"
       }
     ],
     "menus": {

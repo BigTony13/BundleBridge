@@ -87,8 +87,21 @@ window.addEventListener('message',event=>{
     $('title').textContent=m.name;$('footer').textContent=m.files.length+' locale files · '+allKeys.length+' keys'+(m.draft?' · Draft changes retained':' · All changes saved');
     renderDuplicateNotice();
     renderTree();renderEditors();if(index>=0){const area=document.querySelectorAll('textarea')[index];if(area){area.focus();area.setSelectionRange(start,end);}}
-  }else if(m.type==='select')select(m.key);else if(m.type==='error'||m.type==='notice'){$('notice').replaceChildren();$('notice').textContent=m.text;$('notice').className=m.type;}
+  }else if(m.type==='select')select(m.key);else if(m.type==='error'||m.type==='notice')renderStatusMessage(m);
 });
+function renderStatusMessage(m){
+  const notice=$('notice');
+  notice.className=m.type||'';
+  notice.replaceChildren();
+  notice.append(node('p',m.text,'status-copy'));
+  if(m.showLog){
+    const actions=node('div',undefined,'notice-actions');
+    const view=node('button','View diagnostic log');
+    view.onclick=()=>send('showLog');
+    actions.append(view);
+    notice.append(actions);
+  }
+}
 $('search').oninput=()=>{remember();renderTree();};$('missing').onchange=()=>{remember();renderTree();};
 $('duplicates').onchange=()=>{if($('duplicates').checked){const keys=duplicateKeysList();if(keys.length&&!duplicateKey(selected))selected=keys[0];}remember();renderTree();renderEditors();};
 for(const action of ['add','duplicate','rename','delete','copy','save','discard','settings','format','newLocale','localeOrder'])$(action).onclick=()=>send(action,{key:selected});
