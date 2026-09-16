@@ -38,6 +38,12 @@ test('round trips reserved characters, literal escapes, surrogate pairs and whit
 test('alignment and grouping use escaped key lengths and exact group names',()=>{
  const p=parse('a.x=1\na.long=2\nab.y=3\n');const out=format(p,{alignment:'group',groupKeys:true});assert.equal(out,'a.long = 2\na.x    = 1\n\nab.y = 3\n');
 });
+test('format removes blank lines except blankLinesBetweenGroups when groupKeys is on',()=>{
+ assert.equal(format(parse('# Header\n\n\na=1\n\n\nb=2\n')),'# Header\na = 1\nb = 2\n');
+ assert.equal(format(parse('a.x=1\n\n\na.y=2\n\n\nb.z=3\n'),{groupKeys:true,sortKeys:true}),'a.x = 1\na.y = 2\n\nb.z = 3\n');
+ assert.equal(format(parse('a.x=1\n\n\na.y=2\n\n\nb.z=3\n'),{groupKeys:true,sortKeys:true,blankLinesBetweenGroups:2}),'a.x = 1\na.y = 2\n\n\nb.z = 3\n');
+ assert.equal(format(parse('a=1\n\n# note\nb=2\n')),'a = 1\n# note\nb = 2\n');
+});
 test('empty values preserved by default and optionally removed',()=>{assert.equal(format(parse('empty=\n')),'empty = \n');assert.equal(format(parse('empty=\n'),{keepEmptyValues:false}),'');});
 test('malformed Unicode is rejected instead of silently corrupted',()=>{assert.throws(()=>parse('a=\\u12xz'),/Malformed/);});
 test('duplicate keys remain explicit and effective value is last',()=>{const p=parse('a=1\na=2\n');assert.equal(p.entries.length,2);assert.equal(values(p).a,'2');});

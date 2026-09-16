@@ -1,5 +1,6 @@
 {
   "bundleBridge.workspaceLocaleOrder": [
     "en_US"
-  ]
+  ],
+  "bundleBridge.alignment": "none"
 }

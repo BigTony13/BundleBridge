@@ -2,7 +2,7 @@
   "name": "bundlebridge",
   "displayName": "BundleBridge — Properties Resource Bundle Editor",
   "description": "Edit Java properties translations together with a searchable key tree and configurable formatting.",
-  "version": "0.1.0",
+  "version": "0.9.0",
   "publisher": "timesheets",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -24,7 +24,7 @@
   ],
   "scripts": {
     "test": "node --test test/*.test.js",
-    "check": "node --check src/extension.js && node --check src/properties.js && node --check src/applyDocument.js && node --check src/log.js && node --check media/editor.js",
+    "check": "node --check src/extension.js && node --check src/properties.js && node --check src/applyDocument.js && node --check src/log.js && node --check src/bundleSettings.js && node --check src/settingsSchema.js && node --check media/editor.js",
     "package": "npx @vscode/vsce package --allow-missing-repository"
   },
   "contributes": {
@@ -40,6 +40,10 @@
       {
         "command": "bundleBridge.showLog",
         "title": "BundleBridge: Show Diagnostic Log"
+      },
+      {
+        "command": "bundleBridge.openSettings",
+        "title": "BundleBridge: Open Settings"
       }
     ],
     "menus": {
@@ -112,7 +116,7 @@
         },
         "bundleBridge.sortKeys": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "Sort keys alphabetically when saving.",
           "scope": "resource"
         },
@@ -140,7 +144,7 @@
         "bundleBridge.blankLinesBetweenGroups": {
           "type": "integer",
           "default": 1,
-          "description": "Blank lines inserted between groups.",
+          "description": "Blank lines inserted between key groups when Group keys is enabled. All other blank lines are removed when saving or formatting.",
           "scope": "resource",
           "minimum": 0,
           "maximum": 100

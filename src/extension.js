@@ -4,6 +4,8 @@ const crypto=require('node:crypto');
 const {parse,format,bundleName,bundleFileName,normalizeBundleBase,validateBundleBase,folderLocales,buildLocaleTag,localeTagError,normalizeLocaleOrder,sortFilesByLocaleOrder,values,duplicateKeyInfo,defaults}=require('./properties');
 const {replaceFullDocument,summarizeApplyFailures}=require('./applyDocument');
 const {bundleLog,showBundleLog,logLines}=require('./log');
+const {groups:settingsGroups}=require('./settingsSchema');
+const {readBundleSettings,updateBundleSetting}=require('./bundleSettings');
 function localeOrderFromInspect(inspected,layers){
   if(!inspected)return[];
   for(const layer of layers){
@@ -89,9 +91,59 @@ async function createBundle(uri){
   const openFile=bundleFileName(name,targetLocales.includes('')?'':targetLocales[0]);
   await vscode.commands.executeCommand('bundleBridge.open',vscode.Uri.joinPath(uri,openFile));
 }
+function settingsScopeLabel(configUri){
+  if(!configUri)return vscode.workspace.workspaceFolders?.length?'Workspace (no bundle open)':'User (global)';
+  const folder=vscode.workspace.getWorkspaceFolder(configUri);
+  return folder?`Workspace folder: ${folder.name}`:'User (no workspace folder)';
+}
+function resolveSettingsConfigUri(){
+  const active=vscode.window.activeTextEditor?.document?.uri;
+  if(active?.path?.endsWith('.properties'))return vscode.Uri.joinPath(active,'..');
+  return vscode.workspace.workspaceFolders?.[0]?.uri;
+}
+function settingsPanelPayload(configUri,focusLocaleOrder){
+  return {type:'settingsPanel',groups:settingsGroups,values:readBundleSettings(configUri),localeOrderKey:localeOrderSettingKey(),localeOrder:readLocaleOrder(configUri),scopeLabel:settingsScopeLabel(configUri),focusLocaleOrder:!!focusLocaleOrder};
+}
+function settingsWebviewHtml(webview,extensionUri,settingsOnly){
+  const nonce=crypto.randomBytes(24).toString('hex');
+  const media=n=>webview.asWebviewUri(vscode.Uri.joinPath(extensionUri,'media',n));
+  const bodyClass=settingsOnly?' class="settings-only settings-open"':'';
+  const settingsHidden=settingsOnly?'':' hidden';
+  const editorMain=settingsOnly?'':`<main id="editorMain"><aside><div class="search"><input id="search" type="search" placeholder="Search keys and translations" aria-label="Search keys and translations"><label><input id="missing" type="checkbox"> Missing translations only</label><label><input id="duplicates" type="checkbox"> Duplicate source keys only</label></div><div class="tree-toolbar"><span id="count"></span><button id="expand">Expand all</button><button id="collapse">Collapse all</button></div><nav id="tree" aria-label="Resource keys"></nav><button id="add" class="primary">＋ Add key</button></aside><section id="detail"><div class="keybar"><div><span class="eyebrow">SELECTED KEY</span><h2 id="key">Select a key</h2></div><div class="actions"><button id="copy">Copy key</button><button id="duplicate">Duplicate</button><button id="rename">Rename</button><button id="delete">Delete</button></div></div><div id="editors"></div></section></main><footer id="footer">Loading bundle…</footer>`;
+  const bundleHeader=settingsOnly?'':`<header><div><span class="eyebrow">BUNDLEBRIDGE</span><h1 id="title">Loading…</h1><p id="saveStatus" class="save-status" hidden aria-live="polite"></p></div><div class="actions"><button id="newLocale">Add locale…</button><button id="settings">Settings…</button><button id="format">Format files</button><button id="discard">Discard draft</button><button id="save" class="primary">Save bundle</button></div></header><div id="notice" role="status" aria-live="polite"></div>`;
+  const closeLabel=settingsOnly?'Close':'Back to bundle';
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';"><link rel="stylesheet" href="${media('editor.css')}"></head><body${bodyClass}>
+  ${bundleHeader}<section id="settingsPanel" class="settings-panel"${settingsHidden} aria-label="BundleBridge settings"><header class="settings-head"><div><span class="eyebrow">BUNDLEBRIDGE</span><h2>Formatting settings</h2><p id="settingsScope" class="settings-scope"></p></div><button id="closeSettings" type="button">${closeLabel}</button></header><div id="settingsForm" class="settings-form"></div></section>${editorMain}<script nonce="${nonce}" src="${media('editor.js')}"></script></body></html>`;
+}
+let standaloneSettingsPanel;
+function openStandaloneSettingsPanel(context,configUri,focusLocaleOrder){
+  if(standaloneSettingsPanel){
+    standaloneSettingsPanel.reveal();
+    return standaloneSettingsPanel.webview.postMessage(settingsPanelPayload(configUri,focusLocaleOrder));
+  }
+  const panel=vscode.window.createWebviewPanel('bundleBridgeSettings','BundleBridge · Settings',vscode.ViewColumn.Active,{enableScripts:true,localResourceRoots:[vscode.Uri.joinPath(context.extensionUri,'media')]});
+  standaloneSettingsPanel=panel;
+  let chain=Promise.resolve();
+  panel.webview.html=settingsWebviewHtml(panel.webview,context.extensionUri,true);
+  panel.webview.onDidReceiveMessage(m=>{chain=chain.then(async()=>{
+    if(m?.type==='standaloneSettingsReady')return panel.webview.postMessage(settingsPanelPayload(configUri,focusLocaleOrder));
+    if(m?.type==='closeSettings')return panel.dispose();
+    if(m?.type==='setSetting'&&typeof m.key==='string'){
+      await updateBundleSetting(configUri,m.key,m.value);
+      return panel.webview.postMessage(settingsPanelPayload(configUri,false));
+    }
+  }).catch(e=>vscode.window.showErrorMessage(e.message));},undefined,context.subscriptions);
+  panel.onDidDispose(()=>{standaloneSettingsPanel=undefined;});
+}
+async function openBundleBridgeSettings(context,focusLocaleOrder){
+  const opened=[...panels.values()];
+  if(opened.length){const panel=opened.at(-1);panel.reveal();if(panel.openBundleSettings)await panel.openBundleSettings(focusLocaleOrder);return;}
+  openStandaloneSettingsPanel(context,resolveSettingsConfigUri(),focusLocaleOrder);
+}
 function activate(context) {
   const log=bundleLog(context);
   context.subscriptions.push(vscode.commands.registerCommand('bundleBridge.showLog',()=>showBundleLog()));
+  context.subscriptions.push(vscode.commands.registerCommand('bundleBridge.openSettings',async()=>{try{await openBundleBridgeSettings(context,false);}catch(e){vscode.window.showErrorMessage(e.message);}}));
   context.subscriptions.push(vscode.commands.registerCommand('bundleBridge.createBundle',async uri=>{try{await createBundle(uri);}catch(e){vscode.window.showErrorMessage(e.message);}}));
   context.subscriptions.push(vscode.commands.registerCommand('bundleBridge.open',async uri=>{
     try {
@@ -100,14 +152,14 @@ function activate(context) {
       if(!uri)return;
       const name=bundleName(uri.path.split('/').pop());if(!name)throw Error('Choose a .properties file.');
       const folder=vscode.Uri.joinPath(uri,'..'), id=folder.toString()+'/'+name.base;
-      if(panels.has(id)){panels.get(id).reveal();return;}
+      if(panels.has(id)){const existing=panels.get(id);existing.reveal();if(existing.refreshBundle)existing.refreshBundle();return;}
       const panel=vscode.window.createWebviewPanel('bundleBridge',name.base+' · Bundle',vscode.ViewColumn.Active,{enableScripts:true,retainContextWhenHidden:true,localResourceRoots:[vscode.Uri.joinPath(context.extensionUri,'media')]});
       panels.set(id,panel);
       const storageKey='draft:'+id;
       let draft=context.workspaceState.get(storageKey), files=[], activeLocaleOrder=[], chain=Promise.resolve(), disposed=false;
       const configUri=folder;
       const persist=()=>context.workspaceState.update(storageKey,draft);
-      const title=()=>panel.title=(draft?'● ':'')+name.base+' · Bundle';
+      const title=()=>{let prefix='';if(draft)prefix+='● ';if(files.some(f=>f.doc?.isDirty))prefix+='◦ ';panel.title=prefix+name.base+' · Bundle';};
       async function discover(){
         const children=await vscode.workspace.fs.readDirectory(folder); const found=[];
         for(const [filename,type]of children){const n=bundleName(filename);if(type!==vscode.FileType.File||n?.base!==name.base)continue;
@@ -124,10 +176,15 @@ function activate(context) {
         const config=vscode.workspace.getConfiguration('bundleBridge',configUri);
         activeLocaleOrder=readLocaleOrder(configUri);
         const ordered=sortFilesByLocaleOrder(files,activeLocaleOrder,f=>f.locale);
-        const base=ordered.map(f=>({filename:f.filename,locale:f.locale,values:values(f.model),duplicates:f.duplicates,duplicateCounts:f.duplicateCounts}));
-        await panel.webview.postMessage({type:'state',name:name.base,files:base,draft,localeOrder:activeLocaleOrder,separator:config.get('groupSeparator','.')});
+        const base=ordered.map(f=>({filename:f.filename,locale:f.locale,values:values(f.model),duplicates:f.duplicates,duplicateCounts:f.duplicateCounts,sourceDirty:f.doc.isDirty}));
+        const dirtySourceFiles=base.filter(f=>f.sourceDirty).map(f=>f.filename);
+        await panel.webview.postMessage({type:'state',name:name.base,files:base,draft,dirtySourceFiles,localeOrder:activeLocaleOrder,separator:config.get('groupSeparator','.')});
       }
       async function refresh(){await discover();await publish();}
+      panel.refreshBundle=()=>{chain=chain.then(refresh).catch(e=>{if(!disposed)panel.webview.postMessage({type:'error',text:e.message});});};
+      async function openBundleSettings(focusLocaleOrder){if(disposed)return;await panel.webview.postMessage(settingsPanelPayload(configUri,focusLocaleOrder));}
+      panel.openBundleSettings=openBundleSettings;
+      panel.configUri=configUri;
       function beginDraft(){if(!draft)draft={original:Object.fromEntries(files.map(f=>[f.filename,f.doc.getText()])),values:Object.fromEntries(files.map(f=>[f.filename,values(f.model)])),comments:Object.fromEntries(files.map(f=>[f.filename,Object.fromEntries(f.model.entries.map(e=>[e.key,e.comments]))]))};}
       function keys(){return [...new Set(Object.values(draft?.values||Object.fromEntries(files.map(f=>[f.filename,values(f.model)]))).flatMap(v=>Object.keys(v)))];}
       async function reportPanelError(e){
@@ -143,13 +200,19 @@ function activate(context) {
         if(!m||typeof m.type!=='string')return;
         if(m.type==='showLog')return showBundleLog();
         if(m.type==='ready')return refresh();
-        if(m.type==='settings')return vscode.commands.executeCommand('workbench.action.openSettings','@ext:timesheets.bundlebridge');
-        if(m.type==='localeOrder')return vscode.commands.executeCommand('workbench.action.openSettings','@ext:timesheets.bundlebridge bundleBridge.'+localeOrderSettingKey());
+        if(m.type==='localeOrder')return openBundleSettings(true);
+        if(m.type==='closeSettings')return panel.webview.postMessage({type:'hideSettings'});
+        if(m.type==='setSetting'){
+          if(typeof m.key!=='string')return;
+          await updateBundleSetting(configUri,m.key,m.value);
+          if(m.key==='groupSeparator'||m.key==='workspaceLocaleOrder'||m.key==='userLocaleOrder')await refresh();
+          return openBundleSettings(false);
+        }
         if(m.type==='source'){const f=files.find(f=>f.filename===m.file);if(f)await vscode.window.showTextDocument(f.doc,{preview:false});return;}
         if(m.type==='copy'){if(typeof m.key==='string')await vscode.env.clipboard.writeText(m.key);return;}
         if(m.type==='edit'){
           if(typeof m.key!=='string'||typeof m.value!=='string'||!files.some(f=>f.filename===m.file))return;
-          beginDraft();Object.defineProperty(draft.values[m.file],m.key,{value:m.value,writable:true,enumerable:true,configurable:true});await persist();title();return;
+          beginDraft();Object.defineProperty(draft.values[m.file],m.key,{value:m.value,writable:true,enumerable:true,configurable:true});await persist();return publish();
         }
         if(['add','duplicate','rename'].includes(m.type)){
           if(m.type!=='add'&&!keys().includes(m.key))return;
@@ -224,12 +287,10 @@ function activate(context) {
       const changed=()=>{chain=chain.then(refresh).catch(e=>{if(!disposed)panel.webview.postMessage({type:'error',text:e.message});});};
       watcher.onDidCreate(changed);watcher.onDidDelete(changed);watcher.onDidChange(changed);
       const changeDoc=vscode.workspace.onDidChangeTextDocument(e=>{if(files.some(f=>f.doc===e.document))changed();});
-      const changeConfig=vscode.workspace.onDidChangeConfiguration(e=>{if(e.affectsConfiguration('bundleBridge.workspaceLocaleOrder')||e.affectsConfiguration('bundleBridge.userLocaleOrder'))chain=chain.then(refresh).catch(err=>{if(!disposed)panel.webview.postMessage({type:'error',text:err.message});});});
-      panel.onDidDispose(()=>{disposed=true;panels.delete(id);watcher.dispose();changeDoc.dispose();changeConfig.dispose();});
-      const nonce=crypto.randomBytes(24).toString('hex');const media=n=>panel.webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri,'media',n));
-      panel.webview.html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${panel.webview.cspSource}; script-src 'nonce-${nonce}';"><link rel="stylesheet" href="${media('editor.css')}"></head><body>
-      <header><div><span class="eyebrow">BUNDLEBRIDGE</span><h1 id="title">Loading…</h1></div><div class="actions"><button id="newLocale">Add locale…</button><button id="localeOrder">Locale order…</button><button id="settings">Settings</button><button id="format">Format files</button><button id="discard">Discard draft</button><button id="save" class="primary">Save bundle</button></div></header>
-      <div id="notice" role="status" aria-live="polite"></div><main><aside><div class="search"><input id="search" type="search" placeholder="Search keys and translations" aria-label="Search keys and translations"><label><input id="missing" type="checkbox"> Missing translations only</label><label><input id="duplicates" type="checkbox"> Duplicate source keys only</label></div><div class="tree-toolbar"><span id="count"></span><button id="expand">Expand all</button><button id="collapse">Collapse all</button></div><nav id="tree" aria-label="Resource keys"></nav><button id="add" class="primary">＋ Add key</button></aside><section id="detail"><div class="keybar"><div><span class="eyebrow">SELECTED KEY</span><h2 id="key">Select a key</h2></div><div class="actions"><button id="copy">Copy key</button><button id="duplicate">Duplicate</button><button id="rename">Rename</button><button id="delete">Delete</button></div></div><div id="editors"></div></section></main><footer id="footer">Loading bundle…</footer><script nonce="${nonce}" src="${media('editor.js')}"></script></body></html>`;
+      const saveDoc=vscode.workspace.onDidSaveTextDocument(e=>{if(files.some(f=>f.doc.uri.toString()===e.uri.toString()))changed();});
+      const changeConfig=vscode.workspace.onDidChangeConfiguration(e=>{if(!e.affectsConfiguration('bundleBridge'))return;chain=chain.then(refresh).catch(err=>{if(!disposed)panel.webview.postMessage({type:'error',text:err.message});});});
+      panel.onDidDispose(()=>{disposed=true;panels.delete(id);watcher.dispose();changeDoc.dispose();saveDoc.dispose();changeConfig.dispose();});
+      panel.webview.html=settingsWebviewHtml(panel.webview,context.extensionUri,false);
     }catch(e){vscode.window.showErrorMessage(e.message);}
   }));
 }
